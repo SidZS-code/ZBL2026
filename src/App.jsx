@@ -2,14 +2,19 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "./supabase.js";
 
 // ---------- labels ----------
-const CUP_ROUNDS = 7; // 64,32,16,8,QF,SF,F
+const CUP_ROUND_NAMES = {
+  0: "Qualifier",
+  1: "Round of 128",
+  2: "Round of 64",
+  3: "Round of 32",
+  4: "Round of 16",
+  5: "Quarterfinal",
+  6: "Semifinal",
+  7: "Final",
+};
 function roundLabel(bracket, round) {
   if (bracket === "R1") return "Round 1";
-  const left = CUP_ROUNDS - round; // 0 = final
-  if (left === 0) return "Final";
-  if (left === 1) return "Semifinal";
-  if (left === 2) return "Quarterfinal";
-  return `${bracket === "GOLD" ? "Gold" : "Silver"} round ${round}`;
+  return CUP_ROUND_NAMES[round] || `Round ${round}`;
 }
 function bracketLabel(b) {
   return b === "R1" ? "Round 1" : b === "GOLD" ? "Gold Cup" : "Silver Cup";
@@ -204,7 +209,7 @@ function Draw({ matches, playersById }) {
       </div>
       <div className="hint" style={{ marginBottom: 10 }}>
         {br === "R1"
-          ? "Everyone plays Round 1. Win and you enter the Gold Cup; lose and you enter the Silver Cup."
+          ? "Everyone plays Round 1. Win and you enter the Gold Cup; lose and you enter the Silver Cup. A few early matches feed each cup\u2019s short Qualifier round."
           : "Swipe sideways to follow the bracket through to the final."}
       </div>
       <div className="bracket">
@@ -264,7 +269,7 @@ function Admin({ matches, playersById, session, reload }) {
         .sort((a, b) => a.position - b.position),
     [matches, br, round, hideDone]
   );
-  const roundsOf = (b) => (b === "R1" ? [1] : [1, 2, 3, 4, 5, 6, 7]);
+  const roundsOf = (b) => (b === "R1" ? [1] : [0, 1, 2, 3, 4, 5, 6, 7]);
 
   async function saveMatch(m, winnerId) {
     const e = edits[m.id] || {};
@@ -416,7 +421,7 @@ export default function App() {
         <CourtLines />
         <div className="hero-inner">
           <h1>NNI Badminton 2026</h1>
-          <div className="sub">Men's singles · 212 players · Gold Cup and Silver Cup knockouts</div>
+          <div className="sub">Men's singles · 269 players · Gold Cup and Silver Cup knockouts</div>
         </div>
       </header>
       <nav className="nav">
