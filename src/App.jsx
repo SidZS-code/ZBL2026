@@ -3,7 +3,7 @@ import { supabase } from "./supabase.js";
 
 // ---------- labels ----------
 const CUP_ROUND_NAMES = {
-  0: "Qualifier",
+  0: "Opening Round",
   1: "Round of 128",
   2: "Round of 64",
   3: "Round of 32",
@@ -17,7 +17,7 @@ function roundLabel(bracket, round) {
   return CUP_ROUND_NAMES[round] || `Round ${round}`;
 }
 function bracketLabel(b) {
-  return b === "R1" ? "Round 1" : b === "GOLD" ? "Gold Cup" : "Silver Cup";
+  return b === "R1" ? "Round 1" : b === "GOLD" ? "Gold Cup" : "Plate Cup";
 }
 function fmtTime(ts) {
   if (!ts) return null;
@@ -103,26 +103,38 @@ function FindMe({ players, matches, playersById, matchesById }) {
       .sort((a, b) => (a.bracket === "R1" ? 0 : 1) - (b.bracket === "R1" ? 0 : 1) || a.round - b.round);
     const r1 = mine.find((m) => m.bracket === "R1");
     let cup = "tbd";
-    if (r1?.winner_id) cup = r1.winner_id === sel.id ? "gold" : "silver";
-    // road to final: from the player's active (unfinished) match, walk the winner chain
-    const active = mine.find((m) => !m.winner_id) || null;
-    const road = [];
-    let cur = active;
-    // If eliminated from their cup, no road
-    const eliminated = mine.some((m) => m.bracket !== "R1" && m.winner_id && m.winner_id !== sel.id);
-    while (cur && !eliminated) {
-      const oppId = cur.player1_id === sel.id ? cur.player2_id : cur.player1_id === null && cur.player2_id === sel.id ? cur.player1_id : cur.player1_id === sel.id ? cur.player2_id : cur.player1_id;
-      const opp =
-        cur.player1_id && cur.player2_id
-          ? playersById[cur.player1_id === sel.id ? cur.player2_id : cur.player1_id]?.name
-          : cur.is_bye && (cur.player1_id === sel.id || cur.player2_id === sel.id)
-          ? "Bye"
-          : null;
-      road.push({ m: cur, opp });
-      cur = cur.next_match_id ? matchesById[cur.next_match_id] : null;
-      // after the player's own active match, the chain continues only if this is their cup path
+    if (r1) {
+      if (r1.winner_id) cup = r1.winner_id === sel.id ? "gold" : "silver";
+    } else if (mine.length > 0) {
+      cup = mine[0].bracket === "GOLD" ? "gold" : mine[0].bracket === "SILVER" ? "silver" : "tbd";
     }
-    return { mine, cup, road, eliminated };
+    const oppName = (m) =>
+      m.player1_id && m.player2_id
+        ? playersById[m.player1_id === sel.id ? m.player2_id : m.player1_id]?.name
+        : null;
+    // walk a chain of matches following winner links, starting from a match (inclusive)
+    const walk = (start) => {
+      const out = [];
+      let cur = start;
+      while (cur) {
+        out.push({ m: cur, opp: oppName(cur) });
+        cur = cur.next_match_id ? matchesById[cur.next_match_id] : null;
+      }
+      return out;
+    };
+    const active = mine.find((m) => !m.winner_id) || null;
+    const eliminated = mine.some((m) => m.bracket !== "R1" && m.winner_id && m.winner_id !== sel.id);
+    let road = [], winRoad = [], loseEntry = null;
+    if (!eliminated && active) {
+      if (active.bracket === "R1") {
+        // Cup not decided yet: show both futures
+        winRoad = active.next_match_id ? walk(matchesById[active.next_match_id]) : [];
+        loseEntry = active.loser_next_match_id ? matchesById[active.loser_next_match_id] : null;
+      } else {
+        road = walk(active);
+      }
+    }
+    return { mine, cup, road, winRoad, loseEntry, active, eliminated };
   }, [sel, matches, playersById, matchesById]);
 
   return (
@@ -153,7 +165,7 @@ function FindMe({ players, matches, playersById, matchesById }) {
           <div className="myname">
             {sel.name}
             <span className={"cupchip " + my.cup}>
-              {my.cup === "gold" ? "Gold Cup" : my.cup === "silver" ? "Silver Cup" : "Cup decided after Round 1"}
+              {my.cup === "gold" ? "Gold Cup" : my.cup === "silver" ? "Plate Cup" : "Cup decided after Round 1"}
             </span>
           </div>
 
@@ -164,13 +176,47 @@ function FindMe({ players, matches, playersById, matchesById }) {
 
           {my.eliminated ? (
             <div className="road"><h3>Run complete</h3><div className="hint">Thanks for playing — results stay available in the Draw tab.</div></div>
+          ) : my.cup === "tbd" && my.active ? (
+            <>
+              {my.winRoad.length > 0 && (
+                <div className="road">
+                  <h3>Win Round 1 → Gold Cup</h3>
+                  <ol>
+                    {my.winRoad.map(({ m, opp }, i) => (
+                      <li key={m.id} className={i === 0 ? "next" : ""}>
+                        <span className="rl">{roundLabel(m.bracket, m.round)}</span>{" "}
+                        <span className="op">{opp ? `vs ${opp}` : "opponent to be decided"}</span>
+                        {m.court && <span className="op"> · Court {m.court}</span>}
+                        {m.scheduled_at && <span className="op"> · {fmtTime(m.scheduled_at)}</span>}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              )}
+              {my.loseEntry && (
+                <div className="road">
+                  <h3>Lose Round 1 → Plate Cup</h3>
+                  <ol>
+                    <li className="next">
+                      <span className="rl">{roundLabel(my.loseEntry.bracket, my.loseEntry.round)}</span>{" "}
+                      <span className="op">opponent to be decided</span>
+                      {my.loseEntry.court && <span className="op"> · Court {my.loseEntry.court}</span>}
+                      {my.loseEntry.scheduled_at && <span className="op"> · {fmtTime(my.loseEntry.scheduled_at)}</span>}
+                    </li>
+                    <li>
+                      <span className="op">then the Plate knockout continues round by round to the Plate Cup Final — a second trophy is still on the table.</span>
+                    </li>
+                  </ol>
+                </div>
+              )}
+            </>
           ) : my.road.length > 0 && (
             <div className="road">
-              <h3>Road to the final</h3>
+              <h3>Road to the {my.cup === "silver" ? "Plate" : "Gold"} Cup final</h3>
               <ol>
                 {my.road.map(({ m, opp }, i) => (
                   <li key={m.id} className={i === 0 ? "next" : ""}>
-                    <span className="rl">{bracketLabel(m.bracket)} · {roundLabel(m.bracket, m.round)}</span>{" "}
+                    <span className="rl">{roundLabel(m.bracket, m.round)}</span>{" "}
                     <span className="op">{opp ? `vs ${opp}` : "opponent to be decided"}</span>
                     {m.court && <span className="op"> · Court {m.court}</span>}
                     {m.scheduled_at && <span className="op"> · {fmtTime(m.scheduled_at)}</span>}
@@ -205,11 +251,11 @@ function Draw({ matches, playersById }) {
       <div className="brtabs">
         <button className={br === "R1" ? "on" : ""} onClick={() => setBr("R1")}>Round 1</button>
         <button className={br === "GOLD" ? "on g" : ""} onClick={() => setBr("GOLD")}>Gold Cup</button>
-        <button className={br === "SILVER" ? "on s" : ""} onClick={() => setBr("SILVER")}>Silver Cup</button>
+        <button className={br === "SILVER" ? "on s" : ""} onClick={() => setBr("SILVER")}>Plate Cup</button>
       </div>
       <div className="hint" style={{ marginBottom: 10 }}>
         {br === "R1"
-          ? "Everyone plays Round 1. Win and you enter the Gold Cup; lose and you enter the Silver Cup. A few early matches feed each cup\u2019s short Qualifier round."
+          ? "Everyone plays Round 1. Win and you enter the Gold Cup; lose and you enter the Plate Cup. Most players then enter at the Round of 128; a handful of Opening Round matches settle the remaining spots (everyone else has a bye)."
           : "Swipe sideways to follow the bracket through to the final."}
       </div>
       <div className="bracket">
@@ -312,7 +358,7 @@ function Admin({ matches, playersById, session, reload }) {
         <select value={br} onChange={(e) => { setBr(e.target.value); setRound("1"); }}>
           <option value="R1">Round 1</option>
           <option value="GOLD">Gold Cup</option>
-          <option value="SILVER">Silver Cup</option>
+          <option value="SILVER">Plate Cup</option>
         </select>
         <select value={round} onChange={(e) => setRound(e.target.value)}>
           {roundsOf(br).map((r) => <option key={r} value={String(r)}>{roundLabel(br, r)}</option>)}
@@ -393,6 +439,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    document.title = "ZBL 2026";
     if (!supabase) return;
     reload();
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
@@ -420,8 +467,7 @@ export default function App() {
       <header className="hero">
         <CourtLines />
         <div className="hero-inner">
-          <h1>NNI Badminton 2026</h1>
-          <div className="sub">Men's singles · 269 players · Gold Cup and Silver Cup knockouts</div>
+          <h1>ZBL 2026</h1>
         </div>
       </header>
       <nav className="nav">
@@ -438,7 +484,7 @@ export default function App() {
         {tab === "draw" && <Draw matches={matches} playersById={playersById} />}
         {tab === "results" && <Results matches={matches} playersById={playersById} />}
         {tab === "admin" && <Admin matches={matches} playersById={playersById} session={session} reload={reload} />}
-        <div className="footer">Every player's first match is in Round 1. Winners move to the Gold Cup, and everyone else competes for the Silver Cup — two finals, two champions.</div>
+        <div className="footer">Every player's first match is in Round 1. Winners move to the Gold Cup, and everyone else competes for the Plate Cup — two finals, two champions.</div>
       </main>
     </>
   );
